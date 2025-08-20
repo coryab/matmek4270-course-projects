@@ -2,12 +2,18 @@ import numpy as np
 from collections.abc import Callable
 
 
-def mesh_function(f: Callable[[float], float], t: float) -> np.ndarray:
-    raise NotImplementedError
+def mesh_function(f: Callable[[float], float], t: np.ndarray) -> np.ndarray:
+    vf = np.vectorize(f)
+    return vf(t)
 
 
 def func(t: float) -> float:
-    raise NotImplementedError
+    if t >= 0 and t <= 3:
+        return np.exp(-t)
+    elif t > 3 and t <= 4:
+        return np.exp(-3*t)
+    else:
+        raise ValueError("Function only accepts argument t = [0, 4]")
 
 
 def test_mesh_function():
