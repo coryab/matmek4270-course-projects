@@ -8,9 +8,11 @@ We use various boundary conditions.
 
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pytest
 import sympy as sp
+from scipy import sparse
 
 t = sp.Symbol("t")
 
@@ -22,6 +24,8 @@ class VibSolver:
         u'' + w**2 u = f,
 
     """
+
+    order: int = -1
 
     def __init__(self, Nt: int, T: float, w: float = 0.35, I: float = 1.0) -> None:
         """
@@ -38,6 +42,9 @@ class VibSolver:
         self.w = w
         self.T = T
         self.set_mesh(Nt)
+
+    def __call__(self) -> np.ndarray:
+        raise NotImplementedError("Class is not implemented")
 
     def set_mesh(self, Nt: int) -> None:
         """Create mesh of chose size
@@ -75,6 +82,7 @@ class VibSolver:
         """
         u = self()
         ue = self.u_exact()
+
         return np.sqrt(self.dt * np.sum((ue - u) ** 2))
 
     def convergence_rates(
@@ -113,7 +121,8 @@ class VibSolver:
         return r, np.array(E), np.array(dt)
 
     def test_order(self, m: int = 5, N0: int = 100, tol: float = 0.1) -> None:
-        r, E, dt = self.convergence_rates(m, N0)
+        r, _, _ = self.convergence_rates(m, N0)
+
         assert abs(r[-1] - self.order) < tol
 
 
@@ -152,7 +161,21 @@ class VibFD2(VibSolver):
         assert T.is_integer() and T % 2 == 0
 
     def __call__(self) -> np.ndarray:
-        u = np.zeros(self.Nt + 1)
+        dt = self.T / self.Nt
+        g = 2 - self.w * self.w * dt * dt
+
+        A = sparse.diags(
+            [1, -g, 1], np.array([-1, 0, 1]), (self.Nt + 1, self.Nt + 1), "lil"
+        )
+
+        A[0, :3] = 1, 0, 0
+        A[-1, -3:] = 0, 0, 1
+
+        b = np.zeros(self.Nt + 1)
+        b[0] = b[-1] = self.I
+
+        u = sparse.linalg.spsolve(A.tocsr(), b)
+
         return u
 
 
@@ -174,7 +197,30 @@ class VibFD3(VibSolver):
         assert T.is_integer() and T % 2 == 0
 
     def __call__(self) -> np.ndarray:
-        u = np.zeros(self.Nt + 1)
+        """In order to figure figure out u(T), I used u'(T) = 0
+        => (u^{T+1} - u^{T-1}) / 2*h = 0, and get that u^{T+1} = u^{T-1}.
+
+        Using the equation u^{n+1} + (w^2*h^2-2)*u^n + u^{n-1}, we get:
+        u^{T+1} + (w^2*h^2-2)*u^T + u^{T-1}
+        => u^{T-1} + (w^2*h^2-2)*u^T + u^{T-1} | Using u^{T+1} = u^{T-1}
+        => 2*u^{T-1} + (w^2*h^2-2)*u^T
+        """
+        dt = self.T / self.Nt
+        g = 2 - self.w * self.w * dt * dt
+
+        A = sparse.diags(
+            [1, -g, 1], np.array([-1, 0, 1]), (self.Nt + 1, self.Nt + 1), "lil"
+        )
+
+        A[0, :3] = 1, 0, 0
+        A[-1, -3:] = 0, 2, -g
+
+        b = np.zeros(self.Nt + 1)
+        b[0] = self.I
+        b[-1] = 0
+
+        u = sparse.linalg.spsolve(A.tocsr(), b)
+
         return u
 
 
@@ -190,17 +236,43 @@ class VibFD4(VibFD2):
     order: int = 4
 
     def __call__(self) -> np.ndarray:
-        u = np.zeros(self.Nt + 1)
+        h = self.T / self.Nt
+        g = 30 - 12 * self.w * self.w * h * h
+
+        A = sparse.diags(
+            [-1.0, 16.0, -g, 16.0, -1.0],
+            np.array([-2, -1, 0, 1, 2]),
+            (self.Nt + 1, self.Nt + 1),
+            "lil",
+        )
+
+        # Set skewed difference
+        A[1, :6] = 10.0, -(15.0 - 12 * self.w * self.w * h * h), -4.0, 14.0, -6.0, 1.0
+        A[-2, -6:] = 1.0, -6.0, 14.0, -4.0, -(15.0 - 12 * self.w * self.w * h * h), 10.0
+
+        # Set boundary conditions
+        A[0, :5] = 1.0, 0.0, 0.0, 0.0, 0.0
+        A[-1, -5:] = 0.0, 0.0, 0.0, 0.0, 1.0
+
+        b = np.zeros(self.Nt + 1)
+        b[0] = self.I
+        b[-1] = self.I
+
+        u = sparse.linalg.spsolve(A.tocsr(), b)
+
         return u
 
 
-def test_order():
+@pytest.mark.parametrize(
+    "vib_class, N0", [(VibHPL, 100), (VibFD2, 100), (VibFD3, 100), (VibFD4, 20)]
+)
+def test_order(vib_class, N0):
     w = 0.35
-    VibHPL(8, 2 * np.pi / w, w).test_order()
-    VibFD2(8, 2 * np.pi / w, w).test_order()
-    VibFD3(8, 2 * np.pi / w, w).test_order()
-    VibFD4(8, 2 * np.pi / w, w).test_order(N0=20)
+    vib_class(8, 2 * np.pi / w, w).test_order(N0=N0)
 
 
 if __name__ == "__main__":
-    test_order()
+    test_order(VibHPL, 100)
+    test_order(VibFD2, 100)
+    test_order(VibFD3, 100)
+    test_order(VibFD4, 20)
