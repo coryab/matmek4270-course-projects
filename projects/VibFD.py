@@ -83,7 +83,6 @@ class VibSolver:
         u = self()
         ue = self.u_exact()
 
-        return np.sqrt(np.trapz((ue - u) ** 2, self.t))
         return np.sqrt(self.dt * np.sum((ue - u) ** 2))
 
     def convergence_rates(
@@ -122,8 +121,8 @@ class VibSolver:
         return r, np.array(E), np.array(dt)
 
     def test_order(self, m: int = 5, N0: int = 100, tol: float = 0.1) -> None:
-        r, E, dt = self.convergence_rates(m, N0)
-        print(r)
+        r, _, _ = self.convergence_rates(m, N0)
+
         assert abs(r[-1] - self.order) < tol
 
 
@@ -267,13 +266,13 @@ class VibFD4(VibFD2):
 @pytest.mark.parametrize(
     "vib_class, N0", [(VibHPL, 100), (VibFD2, 100), (VibFD3, 100), (VibFD4, 20)]
 )
-def test_order(vib_class, N0=100):
+def test_order(vib_class, N0):
     w = 0.35
     vib_class(8, 2 * np.pi / w, w).test_order(N0=N0)
 
 
 if __name__ == "__main__":
-    test_order(VibHPL)
-    test_order(VibFD2)
-    test_order(VibFD3)
+    test_order(VibHPL, 100)
+    test_order(VibFD2, 100)
+    test_order(VibFD3, 100)
     test_order(VibFD4, 20)
